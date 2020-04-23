@@ -214,6 +214,10 @@ public class HBaseTableTest {
         connection.close();
     }
 
+    /**
+     * 测试过滤器
+     * @throws Exception
+     */
     @Test
     public void testFilter() throws Exception{
         //设置客户端连接配置

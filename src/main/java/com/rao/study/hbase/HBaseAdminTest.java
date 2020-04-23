@@ -1,12 +1,13 @@
 package com.rao.study.hbase;
 
+import com.google.common.collect.Lists;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.*;
-import org.apache.hadoop.hbase.client.Admin;
-import org.apache.hadoop.hbase.client.Connection;
-import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.*;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Test;
+
+import java.util.List;
 
 public class HBaseAdminTest {
 
@@ -245,6 +246,151 @@ public class HBaseAdminTest {
         //一定要记得关闭连接
         admin.close();
         conn.close();
+    }
+
+    /**
+     * 测试预分区,创建表的时候,设置预分区
+     */
+    @Test
+    public void testSplite() throws Exception{
+        //设置客户端连接配置
+        Configuration configuration = HBaseConfiguration.create();
+        //设置zookeeper集群配置
+        configuration.set("hbase.zookeeper.quorum","hadoop102,hadoop103,hadoop104");
+
+        Connection conn = ConnectionFactory.createConnection(configuration);
+
+        //获取admin对象
+        Admin admin = conn.getAdmin();
+
+        HTableDescriptor tableDescriptor = new HTableDescriptor(TableName.valueOf("person"));
+        HColumnDescriptor columnDescriptor = new HColumnDescriptor("info");
+        tableDescriptor.addFamily(columnDescriptor);
+
+        //指定三个分区键,分成4个分区
+        byte[][] splits = Bytes.toByteArrays(new String[]{"000|","001|","002|"});
+
+        //指定分区键
+        admin.createTable(tableDescriptor,splits);
+
+        //一定要记得关闭连接
+        admin.close();
+        conn.close();
+    }
+
+    /**
+     * 测试插入数据到预分区中
+     */
+    @Test
+    public void testPutDataSplit() throws Exception{
+        //设置客户端连接配置
+        Configuration configuration = HBaseConfiguration.create();
+        //设置zookeeper集群配置
+        configuration.set("hbase.zookeeper.quorum","hadoop102,hadoop103,hadoop104");
+
+        Connection conn = ConnectionFactory.createConnection(configuration);
+
+        Table table = conn.getTable(TableName.valueOf("person"));
+
+        table.put(buildData());
+
+        table.close();
+        conn.close();
+    }
+
+    /**
+     * 构建数据
+     * @return
+     */
+    public List<Put> buildData(){
+        List<Put> puts = Lists.newArrayList();
+
+        //按手机号和年-月-日进行hash 求余得出分区号
+        String splitKey = "00"+Math.abs("13824411467_2020-04-22".hashCode()%3)+"_";
+
+        Put put = new Put(Bytes.toBytes(splitKey+"13824411467_2020-04-22 12:12:12"));
+
+        put.addColumn(Bytes.toBytes("info"),Bytes.toBytes("name"),Bytes.toBytes("lisi"));
+        put.addColumn(Bytes.toBytes("info"),Bytes.toBytes("count"),Bytes.toBytes("1"));
+
+        puts.add(put);
+
+        Put put1 = new Put(Bytes.toBytes(splitKey+"13824411467_2020-04-22 10:10:12"));
+
+        put1.addColumn(Bytes.toBytes("info"),Bytes.toBytes("name"),Bytes.toBytes("lisi"));
+        put1.addColumn(Bytes.toBytes("info"),Bytes.toBytes("count"),Bytes.toBytes("1"));
+
+        puts.add(put1);
+
+        Put put2 = new Put(Bytes.toBytes(splitKey+"13824411467_2020-04-22 10:11:12"));
+
+        put2.addColumn(Bytes.toBytes("info"),Bytes.toBytes("name"),Bytes.toBytes("lisi"));
+        put2.addColumn(Bytes.toBytes("info"),Bytes.toBytes("count"),Bytes.toBytes("2"));
+
+        puts.add(put2);
+
+        splitKey = "00"+Math.abs("13824411467_2020-04-23".hashCode()%3)+"_";
+
+        Put put3 = new Put(Bytes.toBytes(splitKey+"13824411467_2020-04-23 10:12:12"));
+
+        put3.addColumn(Bytes.toBytes("info"),Bytes.toBytes("name"),Bytes.toBytes("lisi"));
+        put3.addColumn(Bytes.toBytes("info"),Bytes.toBytes("count"),Bytes.toBytes("3"));
+
+        puts.add(put3);
+
+        return puts;
+    }
+
+    /**
+     * 测试从分区中查数据
+     */
+    @Test
+    public void testScanSplit()throws Exception{
+        //设置客户端连接配置
+        Configuration configuration = HBaseConfiguration.create();
+        //设置zookeeper集群配置
+        configuration.set("hbase.zookeeper.quorum","hadoop102,hadoop103,hadoop104");
+
+        Connection conn = ConnectionFactory.createConnection(configuration);
+
+        Table table = conn.getTable(TableName.valueOf("person"));
+
+        Scan scan = new Scan();
+
+        // 比如要查询手机号13824411467在2020-04-22号到2020-04-23之间的数据
+        //查询对应startRowKey,stopRowKey之间的数据
+        String splitKey = "00"+Math.abs("13824411467_2020-04-22".hashCode()%3)+"_";
+
+
+        String startRow = splitKey+"13824411467_2020-04-22 10:11:12";
+        String stopRow = splitKey+"13824411467_2020-04-23";
+        scan.setStartRow(Bytes.toBytes(startRow));
+        scan.setStopRow(Bytes.toBytes(stopRow));
+
+        ResultScanner resultScanner = table.getScanner(scan);
+
+        for (Result result:resultScanner){
+            for (Cell cell : result.rawCells()) {
+                System.out.println("rowkey="+Bytes.toString(CellUtil.cloneRow(cell)) +
+                        ",cf="+Bytes.toString(CellUtil.cloneFamily(cell)) +
+                        ",cn="+Bytes.toString(CellUtil.cloneQualifier(cell)) +
+                        ",value="+Bytes.toString(CellUtil.cloneValue(cell)));
+            }
+        }
+
+        table.close();
+        conn.close();
+    }
+
+    @Test
+    public void test(){
+        System.out.println(Math.abs("13824411467_2020-04-22".hashCode()%3));
+        String splitKey = "00"+(Math.abs("13824411467_2020-04-22".hashCode()%3))+"_";
+        System.out.println(splitKey);
+        splitKey = "00"+"13824411467_2020-04-23".hashCode()%3+"_";
+        System.out.println(splitKey);
+        splitKey = "00"+Math.abs("13824411467_2020-04-25".hashCode()%3)+"_";
+        System.out.println(splitKey);
     }
 
 }
